@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microphone Recording and Download</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        #volumeChart {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            max-height: 450px;
+        }
+
+        label, select, input, button, a {
+            display: block;
+            margin-bottom: 10px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        button, a {
+            text-align: center;
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            text-decoration: none;
+        }
+
+        button:disabled, a:disabled {
+            background-color: #d3d3d3;
+            pointer-events: none;
+        }
+
+        @media (min-width: 600px) {
+            label, select, input, button, a {
+                width: 100%;
+                max-width: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Microphone Recording Visualization</h1>
+
+        <label for="micSelect">Select Microphone:</label>
+        <select id="micSelect"></select>
+
+        <label for="duration">Duration (seconds):</label>
+        <input type="number" id="duration" value="10">
+
+        <button id="startButton">Start</button>
+        <button id="stopButton" disabled>Stop</button>
+        <button id="toggleListenButton" disabled>Toggle Listening</button>
+
+        <canvas id="volumeChart"></canvas>
+
+        <a id="downloadLink" href="#" download="recording.wav" style="display:none;">Download Recorded Audio</a>
+    </div>
+
+    <script>
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let micSelect = document.getElementById("micSelect");
+        let volumeChart;
+        let chartData = [];
+        let audioBuffer = [];
+        let intervalId;
+        let mediaStream;
+        let savedMediaStream;
+        let listening = false;
+        let audioOutputNode;
+        let microphoneSource;
+        let audioWorkletNode;
+        let bufferSize = 2048;
+        let isRecording = false;
+
+        // Get list of microphones
+        navigator.mediaDevices.enumerateDevices().then(devices => {
+            devices.forEach(device => {
+                if (device.kind === 'audioinput') {
+                    let option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Microphone ${micSelect.length + 1}`;
+                    micSelect.appendChild(option);
+                }
+            });
+        });
+
+        async function startMonitoring() {
+            const duration = parseInt(document.getElementById("duration").value);
+            chartData = [];
+            audioBuffer = [];
+
+            if (volumeChart) {
+                volumeChart.destroy(); // Destroy previous chart
+            }
+            initChart();
+
+            const selectedDeviceId = micSelect.value;
+
+            if (savedMediaStream && savedMediaStream.deviceId === selectedDeviceId) {
+                setupAudioContext(savedMediaStream.stream, duration);
+            } else {
+                navigator.mediaDevices.getUserMedia({
+                    audio: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined }
+                }).then(stream => {
+                    savedMediaStream = { stream: stream, deviceId: selectedDeviceId };
+                    setupAudioContext(stream, duration);
+                }).catch(err => {
+                    console.error("Error accessing microphone: ", err);
+                });
+            }
+        }
+
+        async function setupAudioContext(stream, duration) {
+            if (audioContext) {
+                audioContext.close();
+            }
+
+            audioContext = new AudioContext();
+            await audioContext.audioWorklet.addModule('audio-worklet-processor.js');
+
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            microphoneSource = audioContext.createMediaStreamSource(stream);
+            microphoneSource.connect(analyser);
+
+            // Audio worklet to process audio in a separate thread
+            audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+            microphoneSource.connect(audioWorkletNode);
+
+            // Audio output node to hear the microphone
+            audioOutputNode = audioContext.createGain();
+            audioOutputNode.gain.value = 0; // Initially muted
+            audioWorkletNode.connect(audioOutputNode);
+            audioOutputNode.connect(audioContext.destination); // Output to speakers
+
+            dataArray = new Float32Array(analyser.fftSize);
+
+            audioWorkletNode.port.onmessage = (event) => {
+                if (isRecording) {
+                    const inputData = event.data;
+                    audioBuffer.push(inputData);
+
+                    const maxBufferLength = duration * audioContext.sampleRate;
+                    const currentLength = audioBuffer.reduce((acc, buffer) => acc + buffer.length, 0);
+
+                    if (currentLength > maxBufferLength) {
+                        while (audioBuffer.length && audioBuffer.reduce((acc, buffer) => acc + buffer.length, 0) > maxBufferLength) {
+                            audioBuffer.shift();
+                        }
+                    }
+                }
+            };
+
+            isRecording = true;
+
+            intervalId = setInterval(() => updateChart(duration), 100); // Update every 100ms
+
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+            document.getElementById('toggleListenButton').disabled = false;
+            document.getElementById('downloadLink').style.display = 'none';
+        }
+
+        function stopMonitoring() {
+            if (intervalId) clearInterval(intervalId);
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+
+            isRecording = false;
+
+            const fullLength = audioBuffer.reduce((acc, cur) => acc + cur.length, 0);
+            const recordedAudioBuffer = new Float32Array(fullLength);
+            let offset = 0;
+            for (let i = 0; i < audioBuffer.length; i++) {
+                recordedAudioBuffer.set(audioBuffer[i], offset);
+                offset += audioBuffer[i].length;
+            }
+
+            const wavBlob = encodeWAV(recordedAudioBuffer);
+            const url = URL.createObjectURL(wavBlob);
+            const downloadLink = document.getElementById('downloadLink');
+            downloadLink.href = url;
+            downloadLink.style.display = 'block';
+
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+            document.getElementById('toggleListenButton').disabled = true;
+
+            if (listening) {
+                toggleListening();
+            }
+        }
+
+        function toggleListening() {
+            listening = !listening;
+            audioOutputNode.gain.value = listening ? 1 : 0;
+            document.getElementById('toggleListenButton').innerText = listening ? 'Stop Listening' : 'Start Listening';
+        }
+
+        function updateChart(duration) {
+            analyser.getFloatTimeDomainData(dataArray);
+
+            let sum = 0.0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i] * dataArray[i];
+            }
+            let rms = Math.sqrt(sum / dataArray.length);
+            let volume = 20 * Math.log10(rms);
+
+            chartData.push(volume);
+
+            const maxDataPoints = duration * 10;
+            if (chartData.length > maxDataPoints) {
+                chartData.shift();
+            }
+
+            volumeChart.data.labels = Array.from({ length: chartData.length }, (_, i) => i / 10);
+            volumeChart.data.datasets[0].data = chartData;
+            volumeChart.update();
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('volumeChart').getContext('2d');
+            volumeChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Volume (dB)',
+                        data: [],
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2,
+                        fill: false
+                    }]
+                },
+                options: {
+                    animation: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time (s)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Volume (dB)'
+                            },
+                            min: -100,
+                            max: 0
+                        }
+                    }
+                }
+            });
+        }
+
+        function encodeWAV(samples) {
+            const sampleRate = audioContext.sampleRate;
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(view, 8, 'WAVE');
+
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+
+            writeString(view, 36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        document.getElementById('startButton').addEventListener('click', startMonitoring);
+        document.getElementById('stopButton').addEventListener('click', stopMonitoring);
+        document.getElementById('toggleListenButton').addEventListener('click', toggleListening);
+    </script>
+</body>
+</html>
