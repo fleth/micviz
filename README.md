@@ -1,1 +1,1 @@
-# micviz.github.io
+# micviz
