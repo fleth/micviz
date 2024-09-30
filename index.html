@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Microphone Recording and Download</title>
+    <title>MicViz</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
@@ -43,14 +43,13 @@
             pointer-events: none;
         }
 
-        /* Default vertical layout */
+        /* For horizontal layout on landscape */
         .flex-container {
             display: flex;
             flex-direction: column;
         }
 
         @media (min-width: 800px) and (orientation: landscape) {
-            /* Horizontal layout for landscape mode */
             .flex-container {
                 flex-direction: row;
                 justify-content: space-between;
@@ -67,12 +66,11 @@
                 display: flex;
                 align-items: center;
             }
+        }
 
-            #volumeChart {
-                width: 100%;
-                height: auto;
-                max-height: 450px;
-            }
+        .stats {
+            margin-top: 20px;
+            font-size: 18px;
         }
     </style>
 </head>
@@ -80,7 +78,7 @@
     <div class="container">
         <div class="flex-container">
             <div class="settings">
-                <h1>Microphone Recording Visualization</h1>
+                <h1>MicViz</h1>
 
                 <label for="micSelect">Select Microphone:</label>
                 <select id="micSelect"></select>
@@ -90,9 +88,13 @@
 
                 <button id="startButton">Start</button>
                 <button id="stopButton" disabled>Stop</button>
-                <button id="toggleListenButton" disabled>Toggle Listening</button>
 
                 <a id="downloadLink" href="#" download="recording.wav" style="display:none;">Download Recorded Audio</a>
+
+                <div class="stats">
+                    <p id="maxDbAllTime">Max dB (All time): N/A</p>
+                    <p id="maxDbRecent">Max dB (Recent): N/A</p>
+                </div>
             </div>
 
             <div class="chart-container">
@@ -112,9 +114,8 @@
         let intervalId;
         let mediaStream;
         let savedMediaStream;
-        let listening = false;
-        let audioOutputNode;
-        let microphoneSource;
+        let maxDbAllTime = -Infinity;  // Maximum dB since recording started
+        let maxDbRecent = -Infinity;   // Maximum dB for recent period
         let bufferSize = 2048;
         let isRecording = false;
 
@@ -134,6 +135,8 @@
             const duration = parseInt(document.getElementById("duration").value);
             chartData = [];
             audioBuffer = [];
+            maxDbAllTime = -Infinity;
+            maxDbRecent = -Infinity;
 
             if (volumeChart) {
                 volumeChart.destroy(); // Destroy previous chart
@@ -168,11 +171,6 @@
             microphoneSource = audioContext.createMediaStreamSource(stream);
             microphoneSource.connect(analyser);
 
-            audioOutputNode = audioContext.createGain();
-            audioOutputNode.gain.value = 0; // Initially muted
-            microphoneSource.connect(audioOutputNode);
-            audioOutputNode.connect(audioContext.destination); // Output to speakers
-
             dataArray = new Float32Array(analyser.fftSize);
 
             isRecording = true;
@@ -181,7 +179,6 @@
 
             document.getElementById('startButton').disabled = true;
             document.getElementById('stopButton').disabled = false;
-            document.getElementById('toggleListenButton').disabled = false;
             document.getElementById('downloadLink').style.display = 'none';
         }
 
@@ -212,17 +209,8 @@
 
             document.getElementById('startButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
-            document.getElementById('toggleListenButton').disabled = true;
 
-            if (listening) {
-                toggleListening();
-            }
-        }
-
-        function toggleListening() {
-            listening = !listening;
-            audioOutputNode.gain.value = listening ? 1 : 0;
-            document.getElementById('toggleListenButton').innerText = listening ? 'Stop Listening' : 'Start Listening';
+            updateMaxDbDisplay();
         }
 
         function updateChart(duration) {
@@ -235,16 +223,30 @@
             let rms = Math.sqrt(sum / dataArray.length);
             let volume = 20 * Math.log10(rms);
 
-            chartData.push(volume);
+            // Update all-time max dB
+            if (volume > maxDbAllTime) {
+                maxDbAllTime = volume;
+            }
 
+            // Update recent max dB (within the last 'duration' seconds)
+            chartData.push(volume);
             const maxDataPoints = duration * 10;
             if (chartData.length > maxDataPoints) {
                 chartData.shift();
             }
+            maxDbRecent = Math.max(...chartData);
 
+            // Update the chart
             volumeChart.data.labels = Array.from({ length: chartData.length }, (_, i) => i / 10);
             volumeChart.data.datasets[0].data = chartData;
             volumeChart.update();
+
+            updateMaxDbDisplay();
+        }
+
+        function updateMaxDbDisplay() {
+            document.getElementById('maxDbAllTime').innerText = `Max dB (All time): ${maxDbAllTime.toFixed(2)}`;
+            document.getElementById('maxDbRecent').innerText = `Max dB (Recent): ${maxDbRecent.toFixed(2)}`;
         }
 
         function initChart() {
@@ -321,7 +323,6 @@
 
         document.getElementById('startButton').addEventListener('click', startMonitoring);
         document.getElementById('stopButton').addEventListener('click', stopMonitoring);
-        document.getElementById('toggleListenButton').addEventListener('click', toggleListening);
     </script>
 </body>
 </html>
