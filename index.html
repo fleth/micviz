@@ -160,54 +160,29 @@
             if (audioContext) {
                 audioContext.close();
             }
-        
+
             audioContext = new AudioContext();
-        
-            try {
-                // Check if AudioWorklet is supported
-                if (audioContext.audioWorklet) {
-                    await audioContext.audioWorklet.addModule('./audio-worklet-processor.js');
-                    audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-processor');
-                    microphoneSource.connect(audioWorkletNode);
-                    audioWorkletNode.connect(audioOutputNode);
-                    audioWorkletNode.port.onmessage = (event) => {
-                        if (isRecording) {
-                            const inputData = event.data;
-                            audioBuffer.push(inputData);
-                        }
-                    };
-                } else {
-                    throw new Error('AudioWorklet not supported');
-                }
-            } catch (error) {
-                console.warn('AudioWorklet not supported, falling back to ScriptProcessorNode:', error);
-        
-                // Fallback to ScriptProcessorNode
-                const scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-                microphoneSource.connect(scriptProcessor);
-                scriptProcessor.connect(audioOutputNode);
-        
-                scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-                    if (isRecording) {
-                        const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-                        const copiedData = new Float32Array(inputData.length);
-                        copiedData.set(inputData);
-                        audioBuffer.push(copiedData);
-                    }
-                };
-            }
-        
+
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 2048;
+            microphoneSource = audioContext.createMediaStreamSource(stream);
             microphoneSource.connect(analyser);
-        
+
             audioOutputNode = audioContext.createGain();
             audioOutputNode.gain.value = 0; // Initially muted
             microphoneSource.connect(audioOutputNode);
-            audioOutputNode.connect(audioContext.destination);
-        
+            audioOutputNode.connect(audioContext.destination); // Output to speakers
+
             dataArray = new Float32Array(analyser.fftSize);
+
             isRecording = true;
+
+            intervalId = setInterval(() => updateChart(duration), 100); // Update every 100ms
+
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+            document.getElementById('toggleListenButton').disabled = false;
+            document.getElementById('downloadLink').style.display = 'none';
         }
 
         function stopMonitoring() {
