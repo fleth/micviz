@@ -43,31 +43,62 @@
             pointer-events: none;
         }
 
-        @media (min-width: 600px) {
-            label, select, input, button, a {
+        /* Default vertical layout */
+        .flex-container {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 800px) and (orientation: landscape) {
+            /* Horizontal layout for landscape mode */
+            .flex-container {
+                flex-direction: row;
+                justify-content: space-between;
+            }
+
+            .settings {
+                flex: 1;
+                max-width: 300px;
+                margin-right: 20px;
+            }
+
+            .chart-container {
+                flex: 2;
+                display: flex;
+                align-items: center;
+            }
+
+            #volumeChart {
                 width: 100%;
-                max-width: 400px;
+                height: auto;
+                max-height: 450px;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Microphone Recording Visualization</h1>
+        <div class="flex-container">
+            <div class="settings">
+                <h1>Microphone Recording Visualization</h1>
 
-        <label for="micSelect">Select Microphone:</label>
-        <select id="micSelect"></select>
+                <label for="micSelect">Select Microphone:</label>
+                <select id="micSelect"></select>
 
-        <label for="duration">Duration (seconds):</label>
-        <input type="number" id="duration" value="10">
+                <label for="duration">Duration (seconds):</label>
+                <input type="number" id="duration" value="10">
 
-        <button id="startButton">Start</button>
-        <button id="stopButton" disabled>Stop</button>
-        <button id="toggleListenButton" disabled>Toggle Listening</button>
+                <button id="startButton">Start</button>
+                <button id="stopButton" disabled>Stop</button>
+                <button id="toggleListenButton" disabled>Toggle Listening</button>
 
-        <canvas id="volumeChart"></canvas>
+                <a id="downloadLink" href="#" download="recording.wav" style="display:none;">Download Recorded Audio</a>
+            </div>
 
-        <a id="downloadLink" href="#" download="recording.wav" style="display:none;">Download Recorded Audio</a>
+            <div class="chart-container">
+                <canvas id="volumeChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -84,7 +115,6 @@
         let listening = false;
         let audioOutputNode;
         let microphoneSource;
-        let audioWorkletNode;
         let bufferSize = 2048;
         let isRecording = false;
 
