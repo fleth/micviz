@@ -4,15 +4,70 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MicViz</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        /* General reset and body styling */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Poppins', sans-serif;
+            background-color: #f3f4f6;
+            color: #333;
             padding: 20px;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
+            background-color: #fff;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #1f2937;
+        }
+
+        label, select, input, button, a {
+            display: block;
+            margin-bottom: 15px;
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            box-shadow: inset 2px 2px 6px rgba(0, 0, 0, 0.1), inset -2px -2px 6px rgba(255, 255, 255, 0.7);
+            background-color: #f3f4f6;
+            color: #333;
+            transition: all 0.2s ease;
+        }
+
+        button, a {
+            background-color: #3b82f6;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.1), -3px -3px 6px rgba(255, 255, 255, 0.7);
+        }
+
+        button:disabled, a:disabled {
+            background-color: #cbd5e1;
+            color: #9ca3af;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        button:hover, a:hover {
+            background-color: #2563eb;
         }
 
         #volumeChart {
@@ -22,31 +77,42 @@
             max-height: 450px;
         }
 
-        label, select, input, button, a {
-            display: block;
-            margin-bottom: 10px;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        button, a {
+        .stats {
+            margin-top: 20px;
             text-align: center;
-            padding: 10px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            text-decoration: none;
+            font-size: 18px;
         }
 
-        button:disabled, a:disabled {
-            background-color: #d3d3d3;
-            pointer-events: none;
-        }
-
-        /* For horizontal layout on landscape */
         .flex-container {
             display: flex;
             flex-direction: column;
+            gap: 20px;
+        }
+
+        .toggle-settings {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toggle-button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .chart-container {
+            padding: 20px;
+            background: #f3f4f6;
+            border-radius: 15px;
+            box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.1), -3px -3px 10px rgba(255, 255, 255, 0.7);
         }
 
         @media (min-width: 800px) and (orientation: landscape) {
@@ -61,30 +127,31 @@
                 margin-right: 20px;
             }
 
+            .toggle-settings {
+                display: flex;
+            }
+
             .chart-container {
                 flex: 2;
                 display: flex;
                 align-items: center;
             }
         }
-
-        .stats {
-            margin-top: 20px;
-            font-size: 18px;
-        }
     </style>
 </head>
 <body>
     <div class="container">
+        <h1>MicViz</h1>
         <div class="flex-container">
             <div class="settings">
-                <h1>MicViz</h1>
+                <button class="toggle-button" onclick="toggleSettings()">Hide Settings</button>
+                <div class="toggle-settings" id="toggleSettings">
+                    <label for="micSelect">Select Microphone:</label>
+                    <select id="micSelect"></select>
 
-                <label for="micSelect">Select Microphone:</label>
-                <select id="micSelect"></select>
-
-                <label for="duration">Duration (seconds):</label>
-                <input type="number" id="duration" value="10">
+                    <label for="duration">Duration (seconds):</label>
+                    <input type="number" id="duration" value="10">
+                </div>
 
                 <button id="startButton">Start</button>
                 <button id="stopButton" disabled>Stop</button>
@@ -114,12 +181,31 @@
         let intervalId;
         let mediaStream;
         let savedMediaStream;
-        let maxDbAllTime = -Infinity;  // Maximum dB since recording started
-        let maxDbRecent = -Infinity;   // Maximum dB for recent period
+        let maxDbAllTime = -Infinity;
+        let maxDbRecent = -Infinity;
         let bufferSize = 2048;
         let isRecording = false;
+        let isSettingsVisible = true; // Track the visibility of the settings
 
-        // Get list of microphones
+        document.addEventListener('DOMContentLoaded', () => {
+            toggleSettings(true);  // Initially open settings
+        });
+
+        function toggleSettings(initial = false) {
+            const settingsDiv = document.getElementById("toggleSettings");
+            const toggleButton = document.querySelector(".toggle-button");
+
+            if (initial || settingsDiv.style.display === "none") {
+                settingsDiv.style.display = "flex";
+                toggleButton.textContent = "Hide Settings";
+                isSettingsVisible = true;
+            } else {
+                settingsDiv.style.display = "none";
+                toggleButton.textContent = "Show Settings";
+                isSettingsVisible = false;
+            }
+        }
+
         navigator.mediaDevices.enumerateDevices().then(devices => {
             devices.forEach(device => {
                 if (device.kind === 'audioinput') {
@@ -139,7 +225,7 @@
             maxDbRecent = -Infinity;
 
             if (volumeChart) {
-                volumeChart.destroy(); // Destroy previous chart
+                volumeChart.destroy();
             }
             initChart();
 
@@ -156,6 +242,10 @@
                 }).catch(err => {
                     console.error("Error accessing microphone: ", err);
                 });
+            }
+
+            if (isSettingsVisible) {
+                toggleSettings();  // Auto-hide settings if currently visible
             }
         }
 
@@ -175,7 +265,7 @@
 
             isRecording = true;
 
-            intervalId = setInterval(() => updateChart(duration), 100); // Update every 100ms
+            intervalId = setInterval(() => updateChart(duration), 100);
 
             document.getElementById('startButton').disabled = true;
             document.getElementById('stopButton').disabled = false;
@@ -210,6 +300,10 @@
             document.getElementById('startButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
 
+            if (!isSettingsVisible) {
+                toggleSettings();  // Auto-show settings if currently hidden
+            }
+
             updateMaxDbDisplay();
         }
 
@@ -223,12 +317,6 @@
             let rms = Math.sqrt(sum / dataArray.length);
             let volume = 20 * Math.log10(rms);
 
-            // Update all-time max dB
-            if (volume > maxDbAllTime) {
-                maxDbAllTime = volume;
-            }
-
-            // Update recent max dB (within the last 'duration' seconds)
             chartData.push(volume);
             const maxDataPoints = duration * 10;
             if (chartData.length > maxDataPoints) {
@@ -236,7 +324,10 @@
             }
             maxDbRecent = Math.max(...chartData);
 
-            // Update the chart
+            if (maxDbRecent > maxDbAllTime) {
+                maxDbAllTime = maxDbRecent;
+            }
+
             volumeChart.data.labels = Array.from({ length: chartData.length }, (_, i) => i / 10);
             volumeChart.data.datasets[0].data = chartData;
             volumeChart.update();
@@ -258,7 +349,7 @@
                     datasets: [{
                         label: 'Volume (dB)',
                         data: [],
-                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderColor: '#3b82f6',
                         borderWidth: 2,
                         fill: false
                     }]
